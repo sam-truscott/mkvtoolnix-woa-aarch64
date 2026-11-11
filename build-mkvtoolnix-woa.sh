@@ -30,6 +30,7 @@ GMP_VERSION="${GMP_VERSION:-6.3.0}"
 ICONV_VERSION="${ICONV_VERSION:-1.17}"
 GETTEXT_VERSION="${GETTEXT_VERSION:-0.22.5}"
 WITH_NLS="${WITH_NLS:-1}"          # 0 = skip libiconv/gettext and build without translations
+RELEASE_ARCH="${RELEASE_ARCH:-arm64}"  # official archives are mkvtoolnix-64-bit-<ver>.7z; this is the arch part
 
 WORK="${WORK:-$HOME/mkvtoolnix-woa}"
 JOBS="${JOBS:-$(nproc)}"
@@ -86,7 +87,7 @@ install_host_packages() {
   command -v apt-get >/dev/null || { echo "(not Debian/Ubuntu: install the equivalents yourself)"; return; }
   sudo apt-get update
   sudo apt-get install -y build-essential cmake ninja-build pkg-config curl xz-utils bzip2 \
-    python3 perl ruby rake xsltproc docbook-xsl inkscape imagemagick gettext file
+    python3 perl ruby rake xsltproc docbook-xsl inkscape imagemagick gettext file p7zip-full
 }
 
 get_llvm_mingw() {
@@ -375,6 +376,28 @@ package() {
   echo "Copy to Windows with e.g.:  cp -r '$DIST' /mnt/c/Users/<you>/mkvtoolnix-arm64"
 }
 
+# Portable release archive, laid out like the official one: a top-level mkvtoolnix\ folder,
+# and the empty data\portable-app marker that makes MKVToolNix keep its settings beside the
+# executables instead of in the user profile. MKVToolNix's COPYING (GPLv2) is included
+# because the archive redistributes it.
+make_release() {
+  local name="mkvtoolnix-$RELEASE_ARCH-$MKVTOOLNIX_VERSION"
+  local stage="$WORK/release-stage" out="$WORK/release"
+  local srcdir="$SRC/mkvtoolnix-$MKVTOOLNIX_VERSION"
+  command -v 7z >/dev/null || die "7z not found — install it with: sudo apt-get install p7zip-full"
+  rm -rf "$stage"; mkdir -p "$stage/mkvtoolnix" "$out"
+  cp -a "$DIST"/. "$stage/mkvtoolnix/"
+  mkdir -p "$stage/mkvtoolnix/data"
+  : > "$stage/mkvtoolnix/data/portable-app"
+  [ -f "$srcdir/COPYING" ] && cp "$srcdir/COPYING" "$stage/mkvtoolnix/COPYING.txt"
+  rm -f "$out/$name.7z" "$out/$name.7z.sha256"
+  ( cd "$stage" && 7z a -t7z -mx=9 "$out/$name.7z" mkvtoolnix >/dev/null )
+  ( cd "$out" && sha256sum "$name.7z" > "$name.7z.sha256" )
+  rm -rf "$stage"
+  echo "== Release: $out/$name.7z ($(du -h "$out/$name.7z" | cut -f1))"
+  cat "$out/$name.7z.sha256"
+}
+
 main() {
   mkdir -p "$SRC" "$BUILD" "$STAMPS" "$PREFIX"
   step host-packages   install_host_packages
@@ -407,6 +430,7 @@ main() {
   echo "== mkvtoolnix"
   ( build_mkvtoolnix )
   package
+  make_release
 }
 
 main "$@"

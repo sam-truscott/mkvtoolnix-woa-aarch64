@@ -27,6 +27,7 @@ The script runs these steps in order. Each one records a marker when it finishes
 | 8c | `rcc-no-zstd` | Wraps the Linux Qt's `rcc` so it always passes `--no-zstd`. The Linux Qt may have zstd support, but the Windows ARM64 Qt doesn't, so zstd-compressed resources would leave the GUI without icons |
 | 9 | `mkvtoolnix` | Downloads the MKVToolNix release tarball, runs `configure` and `rake`. It comments out the `msix-assets` target in the Rakefile first: those Microsoft Store tile images aren't needed for a portable build, and their generator needs zsh. It also changes the hard-coded `processorArchitecture="x86"` in MKVToolNix's Windows manifests to `"*"`; otherwise the GUI fails on ARM64 with `0xc000007b`. This step always runs; `rake` is incremental |
 | 10 | package | Copies the `.exe` files, translations, and the GUI's icon resource file and sounds into `dist/`, then checks each `.exe`: its manifest mustn't name x86/x64, and it must import only Windows system DLLs. It then runs `mkvmerge.exe --version` through WSL interop as a quick test |
+| 11 | release | Packs `dist/` into `release/mkvtoolnix-arm64-<version>.7z` with a SHA-256 checksum. It's laid out like the official portable archive (see [Outputs](#outputs)) |
 
 The two Qt builds take most of the time. Allow one to two hours on a typical ARM laptop.
 
@@ -74,6 +75,7 @@ MKVTOOLNIX_VERSION=103.0 QT_VERSION=6.10.1 JOBS=8 ./build-mkvtoolnix-woa.sh
 | `GMP_VERSION` | `6.3.0` | GMP (required by MKVToolNix via Boost.Multiprecision) |
 | `ICONV_VERSION` | `1.17` | libiconv |
 | `GETTEXT_VERSION` | `0.22.5` | gettext runtime (libintl) |
+| `RELEASE_ARCH` | `arm64` | Architecture part of the release name. Official archives are `mkvtoolnix-64-bit-<version>.7z`; this build produces `mkvtoolnix-arm64-<version>.7z` |
 | `WITH_NLS` | `1` | `0` skips libiconv and gettext and passes `--disable-nls` (no translations) |
 | `WORK` | `$HOME/mkvtoolnix-woa` | Directory for everything the script creates |
 | `JOBS` | `$(nproc)` | Number of parallel build jobs |
@@ -93,7 +95,7 @@ Downloads are cached in `$WORK/src/downloads/` and reused on later runs.
 
 ## What it changes on your system
 
-- **Packages installed system-wide with `apt-get`:** `build-essential cmake ninja-build pkg-config curl xz-utils bzip2 python3 perl ruby rake xsltproc docbook-xsl inkscape imagemagick gettext file`. On distributions without `apt-get`, this step is skipped and you need to install the equivalents yourself.
+- **Packages installed system-wide with `apt-get`:** `build-essential cmake ninja-build pkg-config curl xz-utils bzip2 python3 perl ruby rake xsltproc docbook-xsl inkscape imagemagick gettext file p7zip-full`. On distributions without `apt-get`, this step is skipped and you need to install the equivalents yourself.
 - **Everything else stays inside `$WORK`.** The script doesn't write to `/usr`, `/opt`, your shell profile or the Windows filesystem. It modifies `PATH` only for its own process.
 
 Layout of `$WORK`:
@@ -109,7 +111,8 @@ $WORK/
 ├── shim/                          # small wrapper scripts (see below)
 ├── stamps/                        # step-completion markers
 ├── toolchain-aarch64-w64-mingw32.cmake
-└── dist/                          # final output
+├── dist/                          # final output, unpacked
+└── release/                       # mkvtoolnix-arm64-<version>.7z + .sha256
 ```
 
 `shim/` contains:
@@ -139,9 +142,24 @@ locale/<lang>/LC_MESSAGES/mkvtoolnix.mo     # when WITH_NLS=1
   cp -r ~/mkvtoolnix-woa/dist /mnt/c/Users/<you>/mkvtoolnix-arm64
   ```
 
+### Release archive
+
+`$WORK/release/` contains:
+
+```
+mkvtoolnix-arm64-103.0.7z          # portable release, named like the official mkvtoolnix-64-bit-103.0.7z
+mkvtoolnix-arm64-103.0.7z.sha256   # its SHA-256 checksum
+```
+
+Its layout matches the official portable archive. Everything is inside a top-level `mkvtoolnix\` folder, with `dist/`'s contents plus:
+- `data\portable-app`, an empty marker file. With it, MKVToolNix stores its settings beside the executables instead of in your Windows profile, as the official portable build does.
+- `COPYING.txt`, MKVToolNix's GPLv2 licence, because the archive redistributes MKVToolNix.
+
+If you've already built once and the `host-packages` step is done, install 7-Zip yourself: `sudo apt-get install p7zip-full`.
+
 ### Not included
 
-- An installer or MSIX package. You get a portable folder only.
+- An installer or MSIX package. You get a portable folder and a portable `.7z` only.
 - Qt's own translations (`qttranslations`), so Qt dialogs such as file pickers appear in English.
 - Documentation and man pages in `dist/`.
 
