@@ -283,7 +283,41 @@ build_mkvtoolnix() {
   if grep -q '^ *targets << "msix-assets"' Rakefile; then
     sed -i '/^ *targets << "msix-assets"/s/^/# skipped by build-mkvtoolnix-woa.sh: /' Rakefile
   fi
+  fix_manifests
   rake -j"$JOBS"
+}
+
+# MKVToolNix's Windows manifests hard-code processorArchitecture="x86" (for the program and
+# for its Common-Controls dependency). On ARM64 Windows that makes the loader look for an x86
+# Common-Controls and fail with 0xc000007b. "*" means "any architecture".
+# (The MSIX manifest uses a differently-cased ProcessorArchitecture attribute and isn't touched.)
+fix_manifests() {
+  local files
+  files=$(grep -rlE 'processorArchitecture="(x86|amd64)"' \
+            --include='*.manifest' --include='*.rc' --include='*.xml' --include='*.in' . 2>/dev/null || true)
+  [ -n "$files" ] || return 0
+  echo "   patching processorArchitecture in:"; echo "$files" | sed 's/^/     /'
+  echo "$files" | xargs sed -i -E 's/processorArchitecture="(x86|amd64)"/processorArchitecture="*"/g'
+  # make rake recompile the resource files that embed the manifests, then relink
+  find src -name '*.rc' -exec touch {} +
+}
+
+# Fail loudly instead of shipping an .exe that won't start: no x86/x64 manifest
+# dependencies, and no imports of DLLs from this build (everything must be static).
+check_exes() {
+  local exe bad=0 dlls
+  for exe in "$DIST"/*.exe; do
+    if strings "$exe" | grep -qE 'processorArchitecture="(x86|amd64)"'; then
+      echo "   $(basename "$exe"): manifest still names x86/amd64"; bad=1
+    fi
+    dlls=$("$HOST-objdump" -p "$exe" | sed -n 's/.*DLL Name: //p' \
+             | grep -iE '^(lib|qt[0-9]|zlib|icu|gmp|ogg|vorbis|flac|cmark|intl|iconv)' || true)
+    if [ -n "$dlls" ]; then
+      echo "   $(basename "$exe") imports non-system DLLs: $(echo $dlls)"; bad=1
+    fi
+  done
+  [ "$bad" = 0 ] || die "packaged executables failed the checks above"
+  echo "   checks passed: ARM64-safe manifests, system DLL imports only"
 }
 
 package() {
@@ -299,7 +333,8 @@ package() {
     cp "$mo" "$DIST/locale/$lang/LC_MESSAGES/mkvtoolnix.mo"
   done
   echo "== Built:"; ls -l "$DIST"
-  file "$DIST"/*.exe || true      # should say "PE32+ executable ... Aarch64"
+  file "$DIST"/*.exe || true      # should say "PE32+ executable ... ARM64"
+  check_exes
   # WSL interop can launch the Windows ARM64 exe directly as a smoke test
   "$DIST/mkvmerge.exe" --version || echo "(couldn't launch via WSL interop — try it from Windows)"
   echo "Copy to Windows with e.g.:  cp -r '$DIST' /mnt/c/Users/<you>/mkvtoolnix-arm64"
