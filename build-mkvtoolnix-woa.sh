@@ -263,6 +263,27 @@ build_qtmultimedia() {
   build_qt_module qtmultimedia target -DFEATURE_ffmpeg=OFF -DFEATURE_spatialaudio=OFF
 }
 
+# The host Qt's rcc compresses resources with zstd whenever the host Qt has zstd (e.g. because
+# libzstd-dev is installed), but the Windows ARM64 Qt is built without zstd and can't read them:
+# the GUI then starts with almost no icons. Qt's own build passes --no-zstd in that situation;
+# MKVToolNix's rake build calls rcc directly and doesn't, so wrap rcc to always pass it.
+wrap_host_rcc() {
+  local rcc="$HOSTQT/libexec/rcc"
+  [ -e "$rcc.real" ] || { [ -x "$rcc" ] || die "host rcc not found at $rcc"; mv "$rcc" "$rcc.real"; }
+  cat > "$rcc" <<EOF
+#!/bin/sh
+# Installed by build-mkvtoolnix-woa.sh: the target Qt has no zstd support.
+exec "$rcc.real" --no-zstd "\$@"
+EOF
+  chmod +x "$rcc"
+  # If MKVToolNix was already built with zstd resources, make rake regenerate them.
+  local d
+  for d in "$SRC"/mkvtoolnix-*/src; do
+    [ -d "$d" ] && find "$d" -name '*.qrc' -exec touch {} +
+  done
+  return 0
+}
+
 # ---------------------------------------------------------------- MKVToolNix
 build_mkvtoolnix() {
   local dir="$SRC/mkvtoolnix-$MKVTOOLNIX_VERSION"
@@ -326,6 +347,18 @@ package() {
   for exe in mkvmerge mkvinfo mkvextract mkvpropedit mkvtoolnix-gui/mkvtoolnix-gui; do
     [ -f "$dir/src/$exe.exe" ] && cp "$dir/src/$exe.exe" "$DIST/"
   done
+  # The GUI loads its icons at runtime from an external Qt resource file (Linux installs it as
+  # share/mkvtoolnix/qt_resources.rcc), plus its "job finished" sounds. On Windows these live
+  # in a data\ folder beside the executables.
+  local rcc
+  rcc=$(find "$dir" -name qt_resources.rcc -print -quit)
+  [ -n "$rcc" ] || die "qt_resources.rcc wasn't built — the GUI would have no icons"
+  mkdir -p "$DIST/data"
+  cp "$rcc" "$DIST/data/"
+  if compgen -G "$dir/share/sounds/*" >/dev/null; then
+    mkdir -p "$DIST/data/sounds"
+    cp "$dir"/share/sounds/* "$DIST/data/sounds/"
+  fi
   for mo in "$dir"/po/*.mo; do
     [ -f "$mo" ] || continue
     lang=$(basename "$mo" .mo)
@@ -367,6 +400,7 @@ main() {
   step qtshadertools-host build_qtshadertools_host
   step qtshadertools   build_qtshadertools
   step qtmultimedia    build_qtmultimedia
+  step rcc-no-zstd     wrap_host_rcc
 
   echo "== mkvtoolnix"
   ( build_mkvtoolnix )

@@ -24,8 +24,9 @@ The script runs these steps in order. Each one records a marker when it finishes
 | 8 | `qtsvg` | Cross-builds Qt SVG |
 | 8a | `qtshadertools-host`, `qtshadertools` | Builds Qt Shader Tools for Linux (the `qsb` shader compiler) and for Windows ARM64. Qt Multimedia needs both |
 | 8b | `qtmultimedia` | Cross-builds Qt Multimedia, which MKVToolNix requires, using the native Windows Media Foundation backend (no FFmpeg). Spatial audio is disabled, and a missing `#include <istream>` is added to the bundled Resonance Audio code so it compiles with current libc++ |
-| 9 | `mkvtoolnix` | Downloads the MKVToolNix release tarball, runs `configure` and `rake`. It comments out the `msix-assets` target in the Rakefile first: those Microsoft Store tile images aren't needed for a portable build, and their generator needs zsh. This step always runs; `rake` is incremental |
-| 10 | package | Copies the `.exe` files and translations into `dist/` and runs `mkvmerge.exe --version` through WSL interop as a quick test |
+| 8c | `rcc-no-zstd` | Wraps the Linux Qt's `rcc` so it always passes `--no-zstd`. The Linux Qt may have zstd support, but the Windows ARM64 Qt doesn't, so zstd-compressed resources would leave the GUI without icons |
+| 9 | `mkvtoolnix` | Downloads the MKVToolNix release tarball, runs `configure` and `rake`. It comments out the `msix-assets` target in the Rakefile first: those Microsoft Store tile images aren't needed for a portable build, and their generator needs zsh. It also changes the hard-coded `processorArchitecture="x86"` in MKVToolNix's Windows manifests to `"*"`; otherwise the GUI fails on ARM64 with `0xc000007b`. This step always runs; `rake` is incremental |
+| 10 | package | Copies the `.exe` files, translations, and the GUI's icon resource file and sounds into `dist/`, then checks each `.exe`: its manifest mustn't name x86/x64, and it must import only Windows system DLLs. It then runs `mkvmerge.exe --version` through WSL interop as a quick test |
 
 The two Qt builds take most of the time. Allow one to two hours on a typical ARM laptop.
 
@@ -126,6 +127,8 @@ mkvinfo.exe
 mkvextract.exe
 mkvpropedit.exe
 mkvtoolnix-gui.exe
+data/qt_resources.rcc                       # the GUI's icons, loaded at runtime
+data/sounds/                                # "job finished" sounds
 locale/<lang>/LC_MESSAGES/mkvtoolnix.mo     # when WITH_NLS=1
 ```
 
@@ -149,7 +152,9 @@ These are the most likely failure points, in order:
 1. **`configure` can't find Qt 6** (`qmake6 couldn't be run for a dummy project`). MKVToolNix detects Qt by running `qmake6` on a test project. Check that `$WORK/prefix/bin/qmake` exists and works, then read `src/mkvtoolnix-<version>/config.log` near that check.
 2. **`mkvtoolnix-gui.exe` fails to link, or starts and complains about a missing platform plugin.** With static Qt, the `qwindows` platform plugin has to be linked in. The command-line tools don't need it.
 3. **Boost.Filesystem fails to build, or `configure` can't link against it.** It's built with `b2` using its `gcc` toolset pointed at llvm-mingw's `aarch64-w64-mingw32-g++` wrapper. Check `$WORK/build/boost-stage/lib/` for `libboost_filesystem.a`. If you switch to a Boost release older than 1.89, `configure` may also want the `boost_system` stub library; add `--with-system` to the `b2` command.
-4. **A download fails with `curl: (35)` or similar.** This is usually a temporary server problem. Run the script again; finished downloads are cached.
+4. **An `.exe` fails to start with `0xc000007b`.** Windows loaded something built for the wrong processor. The packaging checks cover the two causes seen so far: an x86 manifest dependency, and a DLL left over from the build. If a check fails, `grep -rn processorArchitecture` in the MKVToolNix source shows where the manifest comes from. Otherwise, look for x64 DLLs in the folder you ran the program from, because Windows searches that folder first.
+5. **The GUI starts but most icons are missing.** It loads them from `data\qt_resources.rcc` beside `mkvtoolnix-gui.exe`. Check that the file is there, and that you copied the whole `dist` folder rather than just the `.exe` files. The other known cause is zstd: if the Linux Qt has zstd and the Windows ARM64 Qt doesn't, resources compressed with it can't be read. The `rcc-no-zstd` step prevents this. To check both builds, run `grep -rh 'define QT_FEATURE_zstd' qt-host/include prefix/include`.
+6. **A download fails with `curl: (35)` or similar.** This is usually a temporary server problem. Run the script again; finished downloads are cached.
 
 When reporting a problem, include the last few dozen lines of output and, for `configure` failures, the relevant part of `config.log`.
 
