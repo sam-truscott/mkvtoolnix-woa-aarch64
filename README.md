@@ -4,7 +4,7 @@
 
 MKVToolNix provides official Windows builds for x86 and x64 only. Those builds are cross-compiled with GCC/MinGW, and GCC's Windows ARM64 support is still immature. This script uses [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) (Clang/LLVM), which handles that target well.
 
-> **About this script:** It and this README were written by Claude (Anthropic's AI assistant) at my request. I've reviewed them and am running the build, but the script hasn't yet been verified end to end. Read it before you run it, and expect to fix a step or two. Issues and fixes are welcome.
+> **About this script:** It and this README were written by Claude (Anthropic's AI assistant) at my request, and debugged with Claude while I ran the build. I've reviewed them, and I've verified the result end to end. MKVToolNix 103.0 builds under WSL on a Snapdragon X laptop (Lenovo ThinkPad T14s Gen 6), and the command-line tools and the GUI run natively on Windows ARM64. Other versions or setups may still need a tweak; see [Troubleshooting](#troubleshooting). Issues and fixes are welcome.
 
 ---
 
@@ -162,7 +162,7 @@ When reporting a problem, include the last few dozen lines of output and, for `c
 
 - MKVToolNix is GPL-licensed, Qt is used here under the LGPL/GPL, and the other libraries have their own licences. If you **distribute** the resulting binaries, you take on those licences' obligations, including making the corresponding source available. Static linking matters for the LGPL parts. Check this yourself before publishing builds.
 - This repository contains only the build script and does not include or redistribute any of those projects.
-- Script licence: _TODO: choose one, for example MIT._
+- The script and this README are released under the [MIT License](LICENSE). That covers only the files in this repository, not MKVToolNix (GPLv2) or the other projects it downloads and builds.
 
 ## Credits
 

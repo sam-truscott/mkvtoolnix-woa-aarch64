@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Sam Truscott — see LICENSE
 # Cross-compile MKVToolNix for Windows on ARM64 (aarch64-w64-mingw32) from WSL / Linux
 # using llvm-mingw. Produces statically linked .exe files (no DLLs to ship).
 #
